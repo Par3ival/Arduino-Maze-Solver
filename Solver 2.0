@@ -1,0 +1,524 @@
+/* 
+/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\
+BOB'S BOTS --- TEAM 3 --- MAZE SOLVER
+
+- TURNS IN CORNERS.
+- PERFORM COURSE CORRECTIONS WHEN IN CLOSE PROXIMITY TO WALLS.
+- PERFORMS 3 DIFFERENT RUNS OF THE MAZE.
+    - TURN LEFT AT A T JUNCTION.
+    - TURN RIGHT AT A T JUNCTION.
+    - CHOOSE WHICH TURN WAS FASTER.
+\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/
+*/
+
+// Compass libraries
+// -------------------------------------------------
+#include <Adafruit_HMC5883_U.h>
+#include <Adafruit_Sensor.h>
+#include <Servo.h>
+// Display startup
+// -------------------------------------------------
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#define OLED_RESET 4
+Adafruit_SSD1306 display(OLED_RESET);
+
+Adafruit_HMC5883_Unified mag = Adafruit_HMC5883_Unified(12345);
+
+#define NUMFLAKES 10
+#define XPOS 0
+#define YPOS 1
+#define DELTAY 2
+
+#define LOGO16_GLCD_HEIGHT 16
+#define LOGO16_GLCD_WIDTH  16
+
+const int TOUCH_BUTTON_PIN = 9;
+
+static const unsigned char PROGMEM logo16_glcd_bmp[] =
+{ B00000000, B11000000,
+  B00000001, B11000000,
+  B00000001, B11000000,
+  B00000011, B11100000,
+  B11110011, B11100000,
+  B11111110, B11111000,
+  B01111110, B11111111,
+  B00110011, B10011111,
+  B00011111, B11111100,
+  B00001101, B01110000,
+  B00011011, B10100000,
+  B00111111, B11100000,
+  B00111111, B11110000,
+  B01111100, B11110000,
+  B01110000, B01110000,
+  B00000000, B00110000
+};
+
+// Ultrasonic Startup
+// -------------------------------------------------
+#define trigPin1 3
+#define echoPin1 2
+#define trigPin2 4
+#define echoPin2 5
+#define trigPin3 7
+#define echoPin3 8
+
+// Servo motor startup
+// -------------------------------------------------
+//Pins the servos are attatched to
+int servoPin1 = 12; //Right
+int servoPin2 = 13; //Left
+//0x1E for the compass
+// Create a servo object
+Servo ServoL;
+Servo ServoR;
+
+// Initialise values 
+// -------------------------------------------------
+
+int stopvalue1, stopvalue2;
+long duration, distance, RightSensor, BackSensor, FrontSensor, LeftSensor, timeL1, timeL2, timeR1, timeR2, timer, time1, time2;
+float angle1, angle2, angle3, angle4, angle5;
+int buttonState = 0;
+
+// -------------------------------------------------
+
+void setup()
+{
+  Serial.begin (9600);
+  pinMode(trigPin1, OUTPUT);
+  pinMode(echoPin1, INPUT);
+  pinMode(trigPin2, OUTPUT);
+  pinMode(echoPin2, INPUT);
+  pinMode(trigPin3, OUTPUT);
+  pinMode(echoPin3, INPUT);
+
+  /* Wire.beginTransmission(0x1E); //open communication with HMC5883
+    Wire.write(0x02); //select mode register
+    Wire.write(0x00); //continuous measurement mode
+    Wire.endTransmission();*/
+
+  // Configure button pin as input
+  pinMode(TOUCH_BUTTON_PIN, INPUT);
+
+
+}
+
+// -------------------------------------------------
+// -------------------------------------------------
+
+void loop() {
+start:
+  timer = millis();
+  // Start timer
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);  // Initialize with the I2C addr 0x3C
+  mag.begin(); // Show image buffer on the display hardware
+  display.display();
+  delay(1000);
+  display.clearDisplay(); // Clear the buffer.
+  // Put display.display(); after any command to make it visible
+  
+  // -------------------------------------------------
+  // LEFT WALL
+  // -------------------------------------------------
+  ServoR.attach(servoPin1);
+  ServoL.attach(servoPin2);
+  ServoR.write(0); // Only needed if the robot turns before entering the maze
+  delay(100);
+  ServoR.write(0);
+  ServoL.write(180);
+  delay(400);
+
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("FOLLOWING LEFT WALL");
+  display.display();
+  display.clearDisplay();
+
+  timeL1 = millis();
+  while ((FrontSensor < 50) || (LeftSensor < 50) || (RightSensor < 50)) {
+    //Serial.print(LeftSensor); Serial.print("--"); Serial.print(FrontSensor); Serial.print("--"); Serial.print(RightSensor);
+    WallFollower();
+    TL();
+  }
+  timeL2 = millis(); // Store the time the loop exited (End of maze)
+  ServoL.detach(); // Stop the motors completely
+  ServoR.detach();
+  timeL2 = timeL2 - timeL1; //Serial.print(timeL2); Serial.print("\n");
+  timeL2 = timeL2 / 1000; //Serial.print(timeL2);
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println(timeL2, DEC); display.println("Seconds");
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+  buttonState = 0;
+  buttonState = digitalRead(TOUCH_BUTTON_PIN);
+
+  while (buttonState == LOW ) {
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(0, 0);
+    display.println("Waiting for\ninput");
+    display.display();
+    display.clearDisplay();
+    buttonState = digitalRead(TOUCH_BUTTON_PIN);
+
+  }
+
+  buttonState = 0;
+
+// -------------------------------------------------
+// RIGHT WALL
+// -------------------------------------------------
+
+  ServoR.attach(servoPin1);
+  ServoL.attach(servoPin2);
+  ServoR.write(0);
+  delay(100);
+  ServoR.write(0);
+  ServoL.write(180);
+  delay(400);
+
+  SonarSensor(trigPin1, echoPin1);
+  RightSensor = distance;
+  SonarSensor(trigPin2, echoPin2);
+  FrontSensor = distance;
+  SonarSensor(trigPin3, echoPin3);
+  LeftSensor = distance;
+
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("FOLLOWING RIGHT WALL");
+  display.display();
+  display.clearDisplay();
+
+  timeR1 = millis();
+  while ((FrontSensor < 50) || (LeftSensor < 50) || (RightSensor < 50)) {
+    WallFollower();
+    TR();
+  }
+  timeR2 = millis(); // Store the time the loop exited (End of maze)
+  ServoL.detach(); // Stop the motors completely
+  ServoR.detach();
+  timeR2 = timeR2 - timeR1; //Serial.print(timeL2); Serial.print("\n");
+  timeR2 = timeR2 / 1000; //Serial.print(timeL2);
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println(timeR2, DEC); display.println("Seconds");
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+
+  buttonState = digitalRead(TOUCH_BUTTON_PIN);
+
+  while (buttonState == LOW ) {
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(0, 0);
+    display.println("Waiting for\ninput");
+    display.display();
+    display.clearDisplay();
+    buttonState = digitalRead(TOUCH_BUTTON_PIN);
+
+  }
+
+// -------------------------------------------------
+// CHOOSE WALL TO FOLLOW
+// -------------------------------------------------
+
+  buttonState = 0;
+
+  ServoR.attach(servoPin1);
+  ServoL.attach(servoPin2);
+  ServoR.write(0);
+  delay(100);
+  ServoR.write(0);
+  ServoL.write(180);
+  delay(400);
+
+  SonarSensor(trigPin1, echoPin1);
+  RightSensor = distance;
+  SonarSensor(trigPin2, echoPin2);
+  FrontSensor = distance;
+  SonarSensor(trigPin3, echoPin3);
+  LeftSensor = distance;
+
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("FASTEST RUN\nINCOMING");
+  display.display();
+  display.clearDisplay();
+
+  time1 = millis();
+  if (timeL2 > timeR2) {
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(0, 0);
+    display.println("RIGHT WALL\nQUICKEST");
+    display.display();
+    delay(500);
+    display.clearDisplay();
+    while ((FrontSensor < 50) || (LeftSensor < 50) || (RightSensor < 50)) {
+      WallFollower();
+      TR();
+    }
+  } else {
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(0, 0);
+    display.println("LEFT WALL\nQUICKEST");
+    display.display();
+    delay(500);
+    display.clearDisplay();
+    while ((FrontSensor < 50) || (LeftSensor < 50) || (RightSensor < 50)) {
+      WallFollower();
+      TL();
+    }
+  }
+  time2 = millis();
+  ServoL.detach(); // Stop the motors completely
+  ServoR.detach();
+  time2 = time2 - time1; //Serial.print(timeL2); Serial.print("\n");
+  time2 = time2 / 1000; //Serial.print(timeL2);
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println(time2, DEC); display.println("Seconds");
+  display.display();
+  delay(2000);
+  display.clearDisplay();
+
+  buttonState = 0;
+  buttonState = digitalRead(TOUCH_BUTTON_PIN);
+
+// -------------------------------------------------
+// MAZE SOLVED --- MAY SET BUTTON TO RESET
+// -------------------------------------------------
+  while (buttonState == LOW) {
+    display.setTextSize(2);
+    display.setTextColor(WHITE);
+    display.setCursor(0, 0);
+    display.println("MAZE SOLVED");
+    display.display();
+  }
+  display.clearDisplay();
+
+}
+
+// -------------------------------------------------
+// FUNCTIONS
+// -------------------------------------------------
+
+// -------------------------------------------------
+// ULTRASONIC SENSOR DATA
+// -------------------------------------------------
+
+void SonarSensor(int trigPin, int echoPin)
+{
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  duration = pulseIn(echoPin, HIGH);
+  distance = (duration / 2) / 29.1;
+
+}
+
+// -------------------------------------------------
+// BEARING/HEADING CALCULATION
+// -------------------------------------------------
+
+float getbearing()
+{
+  /* Get a new sensor event */
+  sensors_event_t event;
+  mag.getEvent(&event);
+  // Hold the module so that Z is pointing 'up' and you can measure the heading with x&y
+  // Calculate heading when the magnetometer is level, then correct for signs of axis.
+  float heading = atan2(event.magnetic.y, event.magnetic.x);
+  float declinationAngle = -0.015;
+  heading += declinationAngle;
+
+  // Correct for when signs are reversed.
+  if (heading < 0)
+    heading += 2 * PI;
+
+  if (heading > 2 * PI)
+    heading -= 2 * PI;
+
+  // Convert radians to degrees for readability.
+  float headingDegrees = heading * 180 / M_PI;
+  if (headingDegrees < 0) {
+    headingDegrees = headingDegrees * -1;
+  }
+  return headingDegrees;
+}
+
+// -------------------------------------------------
+// BASIC MAZE NAVIGATION
+// -------------------------------------------------
+
+void WallFollower()
+{
+  delay(10);
+  angle1 = 0;
+  angle2 = 0;
+  angle3 = 0;
+  angle4 = 0;
+  angle5 = 0;
+  // Repeatedly Tests the sensors
+  SonarSensor(trigPin1, echoPin1);
+  RightSensor = distance;
+  SonarSensor(trigPin2, echoPin2);
+  FrontSensor = distance;
+  SonarSensor(trigPin3, echoPin3);
+  LeftSensor = distance;
+  ServoR.write(0);
+  ServoL.write(180);
+  if ((FrontSensor < 5) && (LeftSensor < 12) && (RightSensor > 14)) { //Turns right in a corner
+    angle1 = getbearing();
+    angle5 = angle1 + 80;
+    if (angle5 > 360) {
+      angle5 -= 360;
+    }
+    angle1 = angle5 - 5;
+    angle4 = angle5 + 5;
+    angle2 = angle5 + 10;
+    while ((angle2 < angle1) || (angle2 > angle4)) {
+      
+     /* display.setTextSize(2);
+      display.setTextColor(WHITE);
+      display.setCursor(0, 0);
+      display.println(angle2);
+      display.display();
+      display.clearDisplay();*/
+
+      ServoL.writeMicroseconds(1600);//1700 IS TOO FAST!
+      ServoR.writeMicroseconds(1600);
+      angle2 = getbearing();
+    }
+  }
+
+  else if ((FrontSensor < 5) && (RightSensor < 12) && (LeftSensor > 14)) { //Turns left in a corner
+    angle1 = getbearing();
+    angle5 = angle1 - 80;
+    if (angle5 < 0) {
+      angle5 += 360;
+    }
+    angle1 = angle5 - 5;
+    angle4 = angle5 + 5;
+    angle2 = angle5 + 10;
+    while ((angle2 < angle1) || (angle2 > angle4)) {
+      
+      /*display.setTextSize(2);
+      display.setTextColor(WHITE);
+      display.setCursor(0, 0);
+      display.println(angle2);
+      display.display();
+      display.clearDisplay();*/
+      
+      ServoL.writeMicroseconds(1400);//1300
+      ServoR.writeMicroseconds(1400);
+      angle2 = getbearing();
+    }
+  }
+  else if ((FrontSensor < 9) && (LeftSensor < 9) && (RightSensor < 9)) {
+    angle1 = getbearing();
+    angle5 = angle1 + 170;
+    if (angle5 > 360) {
+      angle5 -= 360;
+    }
+    angle1 = angle5 - 10;
+    angle4 = angle5 + 10;
+    angle2 = angle5 + 20;
+    while ((angle2 < angle1) || (angle2 > angle4)) {
+      
+     /* display.setTextSize(2);
+      display.setTextColor(WHITE);
+      display.setCursor(0, 0);
+      display.println(angle2);
+      display.display();
+      display.clearDisplay();*/
+ angle2 = getbearing();
+      ServoL.writeMicroseconds(1700);//1700
+      ServoR.writeMicroseconds(1700);
+     
+    }
+  }
+  else if (LeftSensor < 7) {
+    ServoL.write(180);
+    ServoR.write(90);
+  } else if (RightSensor < 7) {
+    ServoL.write(90);
+    ServoR.write(0);
+  }
+}
+
+// -------------------------------------------------
+// TURNS LEFT AT T JUNCTION
+// -------------------------------------------------
+
+void TL() {
+  if ((FrontSensor < 6) && (LeftSensor > 10) && (RightSensor > 10)) {
+    angle1 = getbearing();
+    angle5 = angle1 - 80;
+    if (angle5 < 0) {
+      angle5 += 360;
+    }
+    angle1 = angle5 - 10;
+    angle4 = angle5 + 10;
+    angle2 = angle5 + 20;
+    while ((angle2 < angle1) || (angle2 > angle4)) {
+      
+     /* display.setTextSize(2);
+      display.setTextColor(WHITE);
+      display.setCursor(0, 0);
+      display.println(angle2);
+      display.display();
+      display.clearDisplay();*/
+
+      ServoL.writeMicroseconds(1420);//1700
+      ServoR.writeMicroseconds(1420);
+      angle2 = getbearing();
+    }
+  }
+}
+
+// -------------------------------------------------
+// TURNS RIGHT AT A T JUNCTION
+// -------------------------------------------------
+
+void TR() {
+  if ((FrontSensor < 6) && (LeftSensor > 10) && (RightSensor > 10)) {
+    angle1 = getbearing();
+    angle5 = angle1 + 80;
+    if (angle5 > 360) {
+      angle5 -= 360;
+    }
+    angle1 = angle5 - 10;
+    angle4 = angle5 + 10;
+    angle2 = angle5 + 20;
+    while ((angle2 < angle1) || (angle2 > angle4)) {
+      
+     /* display.setTextSize(2);
+      display.setTextColor(WHITE);
+      display.setCursor(0, 0);
+      display.println(angle2);
+      display.display();
+      display.clearDisplay();*/
+
+      ServoL.writeMicroseconds(1580);//1700
+      ServoR.writeMicroseconds(1580);
+      angle2 = getbearing();
+    }
+  }
+}
